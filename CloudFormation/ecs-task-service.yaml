@@ -1,0 +1,196 @@
+Description: >
+    This is an example of creating a cluster service to launch an API of Microservice.
+
+Parameters: 
+
+    ClusterName:
+        Description: Please provide the ECS Cluster ID that this service should run on
+        Type: String
+    ServiceName:
+        Description: Please provide the service name to create.
+        Type: String
+    ServicePathPattern:
+        Description: Please provide the service name to create.
+        Type: String
+        Default: /xxx/*
+    DesiredCount: 
+        Description: How many instances of this task should we run across our cluster?
+        Type: Number
+        Default: 1
+    ImageUrl:
+        Description: The Image url from ECR
+        Type: String
+    VPCId:
+        Description: Choose which VPC this ECS cluster should be deployed to
+        Type: AWS::EC2::VPC::Id
+
+    Subnets:
+        Description: Choose which subnets this ELB and cluster should be created
+        Type: List<AWS::EC2::Subnet::Id>
+
+    ECSServiceSecurityGroup:
+        Description: Choose which security group this service should be configureed
+        Type: List<String>
+    ELBListenerArn:
+        Description: The Arn of elb listener 
+        Type: String
+    ELBListenerRulePriority: 
+        Description: Rule Priority
+        Type: Number
+        Default: 2
+
+Resources:
+
+    TaskDefinition:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            Family: !Ref ServiceName
+            ExecutionRoleArn: !Ref ECSTaskExecutionRole
+            TaskRoleArn: !Ref ECSTaskExecutionRole
+            RequiresCompatibilities: ["FARGATE"]
+            NetworkMode: "awsvpc"
+            Memory: 512
+            Cpu: 256 
+            ContainerDefinitions:
+                - Name: !Ref ServiceName
+                  Essential: true
+                  Image: !Ref ImageUrl
+                  MemoryReservation: 512
+                  Cpu: 256
+                  Environment: 
+                    - Name: "Cache:AWSRedisEndPoint"
+                      Value: "insurance-cache.rbhtvp.ng.0001.usw1.cache.amazonaws.com"
+                    - Name: "ConnectionStrings:InsuranceConnection"
+                      Value: "Server=ff"
+                  PortMappings:
+                    - ContainerPort: 80
+                      HostPort: 80
+                  LogConfiguration:
+                    LogDriver: awslogs
+                    Options:
+                        awslogs-group: !Ref AWS::StackName
+                        awslogs-region: !Ref AWS::Region
+                        awslogs-stream-prefix: !Ref ServiceName
+
+    Service: 
+        Type: AWS::ECS::Service
+        DependsOn: LoadBalancerRule
+        Properties: 
+            Cluster: !Ref ClusterName
+            LaunchType: "FARGATE"
+            DesiredCount: !Ref DesiredCount
+            TaskDefinition: !Ref TaskDefinition
+            ServiceName: !Ref ServiceName
+            DeploymentConfiguration:
+              MaximumPercent: 200
+              MinimumHealthyPercent: 75
+            NetworkConfiguration:
+              AwsvpcConfiguration:
+                AssignPublicIp: ENABLED
+                SecurityGroups: !Ref ECSServiceSecurityGroup
+                Subnets: !Ref Subnets
+            LoadBalancers: 
+                - ContainerName: !Ref ServiceName                  
+                  ContainerPort: 80
+                  TargetGroupArn: !Ref TargetGroup
+
+    CloudWatchLogsGroup:
+        Type: AWS::Logs::LogGroup
+        Properties: 
+            LogGroupName: !Ref AWS::StackName
+            RetentionInDays: 365
+    # A target group. This is used for keeping track of all the tasks, and
+    # what IP addresses / port numbers they have. You can query it yourself,
+    # to use the addresses yourself, but most often this target group is just
+    # connected to an application load balancer, or network load balancer, so
+    # it can automatically distribute traffic across all the targets.
+    TargetGroup:
+      Type: AWS::ElasticLoadBalancingV2::TargetGroup
+      Properties:
+        HealthCheckIntervalSeconds: 6
+        HealthCheckPath: /Health
+        HealthCheckProtocol: HTTP
+        HealthCheckTimeoutSeconds: 5
+        HealthyThresholdCount: 2
+        TargetType: ip
+        Name: !Ref ServiceName
+        Port: 80
+        Protocol: HTTP
+        UnhealthyThresholdCount: 2
+        VpcId: !Ref VPCId
+
+    # Create a rule on the load balancer for routing traffic to the target group
+    LoadBalancerRule:
+      Type: AWS::ElasticLoadBalancingV2::ListenerRule
+      Properties:
+        Actions:
+          - TargetGroupArn: !Ref TargetGroup
+            Type: "forward"
+        Conditions:
+          - Field: path-pattern
+            Values: [!Ref ServicePathPattern]
+        ListenerArn: !Ref ELBListenerArn
+        Priority: !Ref ELBListenerRulePriority
+    # This IAM Role is attached to all of the ECS hosts. It is based on the default role
+    # published here:
+    # http://docs.aws.amazon.com/AmazonECS/latest/developerguide/instance_IAM_role.html
+    #
+    # You can add other IAM policy statements here to allow access from your ECS hosts
+    # to other AWS services. Please note that this role will be used by ALL containers
+    # running on the ECS host.
+
+    ECSTaskExecutionRole:
+        Type: AWS::IAM::Role
+        Properties: 
+            Path: /
+            RoleName: !Sub ${ServiceName}-ECSTaskExecutionRole-${AWS::Region}
+            AssumeRolePolicyDocument: |
+                {
+                    "Statement": [{
+                        "Action": "sts:AssumeRole",
+                        "Effect": "Allow",
+                        "Principal": { 
+                            "Service": "ecs-tasks.amazonaws.com" 
+                        }
+                    }]
+                }
+            Policies: 
+                - PolicyName: ecs-service
+                  PolicyDocument: |
+                    {
+                        "Statement": [{
+                            "Effect": "Allow",
+                            "Action": [
+                                "ecs:CreateCluster",
+                                "ecs:DeregisterContainerInstance",
+                                "ecs:DiscoverPollEndpoint",
+                                "ecs:Poll",
+                                "ecs:RegisterContainerInstance",
+                                "ecs:StartTelemetrySession",
+                                "ecs:Submit*",
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents",
+                                "ecr:BatchCheckLayerAvailability",
+                                "ecr:BatchGetImage",
+                                "ecr:GetDownloadUrlForLayer",
+                                "ecr:GetAuthorizationToken",
+                                "ecr:*"
+                            ],
+                            "Resource": "*"
+                        },
+                      {
+                        "Sid": "SecondStatement",
+                        "Effect": "Allow",
+                        "Action": "cloudwatch:*",
+                        "Resource": "*"
+                      }]
+                    }
+
+    ECSInstanceProfile: 
+        Type: AWS::IAM::InstanceProfile
+        Properties:
+            Path: /
+            Roles: 
+                - !Ref ECSTaskExecutionRole
+
+    

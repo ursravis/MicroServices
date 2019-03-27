@@ -1,0 +1,97 @@
+Description: >
+    This template deploys an ECS cluster and ELB to the provided VPC and subnets 
+    using Fargate
+
+Parameters:
+
+    EnvironmentName:
+        Description: An environment name that will be prefixed to resource names
+        Type: String
+
+    VPCId:
+        Description: Choose which VPC this ECS cluster should be deployed to
+        Type: AWS::EC2::VPC::Id
+
+    Subnets:
+        Description: Choose which subnets this ELB and cluster should be created
+        Type: List<AWS::EC2::Subnet::Id>
+
+    PrivateIpAddress:
+        Description: Ip address range to allow in security group
+        Type: String
+        Default: 0.0.0.0/0
+
+Resources:
+
+    ECSCluster:
+        Type: AWS::ECS::Cluster
+        Properties:
+            ClusterName: !Ref EnvironmentName
+
+    
+    ElasticLoadBalancer:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        Properties:
+            Name: !Sub ${EnvironmentName}-LoadBalancer
+            Scheme: "internet-facing"
+            Type: "application"
+            Subnets: !Ref Subnets
+            SecurityGroups:
+                - Ref: ELBSecurityGroup
+    ELBListener:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        Properties:
+            DefaultActions:
+              - Type: fixed-response
+                FixedResponseConfig:
+                    ContentType: "text/plain"
+                    MessageBody: "You've reached the listener! Congrats!"
+                    StatusCode: "503"
+            LoadBalancerArn: !Ref ElasticLoadBalancer
+            Port: '80'
+            Protocol: HTTP
+    
+    ELBSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupName: !Sub ${EnvironmentName}-ELBSecurityGroup
+            GroupDescription: Allow http  to ELB from specified ip range
+            VpcId: !Ref VPCId
+            SecurityGroupIngress:
+              - 
+                IpProtocol: "tcp"
+                FromPort: 80
+                ToPort: 80
+                CidrIp: !Ref PrivateIpAddress
+            SecurityGroupEgress:
+              - 
+                IpProtocol: -1
+                FromPort: -1
+                ToPort: -1
+                CidrIp: 0.0.0.0/0
+    ECSServiceSecuritygroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupName: !Sub ${EnvironmentName}-ECSServiceSecuritygroup
+            GroupDescription: Allow http to client host from ELB
+            VpcId: !Ref VPCId
+            SecurityGroupIngress:
+              - IpProtocol: -1
+                FromPort: -1
+                ToPort: -1
+                SourceSecurityGroupId: !Ref ELBSecurityGroup
+              - IpProtocol: -1
+                FromPort: -1
+                ToPort: -1
+                CidrIp: !Ref PrivateIpAddress
+            SecurityGroupEgress:
+              - IpProtocol: -1
+                FromPort: -1
+                ToPort: -1
+                CidrIp: 0.0.0.0/0
+    
+Outputs:
+
+    Cluster:
+        Description: A reference to the ECS cluster
+        Value: !Ref ECSCluster

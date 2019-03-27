@@ -1,0 +1,22 @@
+version: '3.4'
+services:
+  metadataapi:
+    build:
+      context: .
+      dockerfile: dockerfile_metadata
+    image: metadataapi:latest
+    environment:
+      - ConnectionStrings:InsuranceConnection= ${InsuranceConnection}
+      - Cache:AWSRedisEndPoint= ${AWSRedisEndPoint}
+    ports:
+      - "8080:80"
+  policyapi:
+    build:
+      context: .
+      dockerfile: dockerfile_policy
+    image: policyapi:latest
+    environment:
+      - Cache:AWSRedisEndPoint= ${AWSRedisEndPoint}
+    ports:
+      - "8081:80"
+  

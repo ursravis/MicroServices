@@ -1,0 +1,26 @@
+# Build Stage
+FROM microsoft/dotnet:2.2.100-sdk AS build-env
+WORKDIR /src
+
+#   Copy sln file build folder 
+COPY ./*.sln ./
+
+#   Copy only .csproj and restore
+COPY ./*/*.csproj ./
+RUN for file in $(ls *.csproj); do mkdir -p ./${file%.*}/ && mv $file ./${file%.*}/; done
+RUN dotnet restore 
+
+#   Copy everything else and build
+COPY . .
+RUN dotnet build
+
+#   publish
+RUN dotnet publish --no-restore ./PolicyService/ -o /publishFolder --configuration Release
+
+
+
+# Build runtime image for PolicyService
+FROM microsoft/dotnet:2.2.0-aspnetcore-runtime
+WORKDIR /app
+COPY --from=build-env /publishFolder .
+ENTRYPOINT ["dotnet", "PolicyService.dll"]
